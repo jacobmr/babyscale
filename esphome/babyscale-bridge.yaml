@@ -1,0 +1,68 @@
+# M5Stack NanoC6 (ESP32-C6) bridge for the Greater Goods baby scale (BS1711-B).
+# Wi-Fi is set on site: with no saved network the M5 opens hotspot "babyscale-bridge".
+# Join it from a phone (no password) and pick the home network.
+# Build needs secrets.yaml (gitignored): decrypt secrets.enc.yaml with sops first.
+esphome:
+  name: babyscale-bridge
+
+esp32:
+  variant: esp32c6
+  flash_size: 4MB
+  framework:
+    type: esp-idf
+
+wifi:
+  ap:
+    ssid: babyscale-bridge  # open: it only runs until a home network is saved
+  # One radio: BLE scanning starves the setup hotspot, so Bluetooth starts only once Wi-Fi is up.
+  on_connect:
+    - ble.enable:
+
+esp32_ble:
+  enable_on_boot: false
+
+captive_portal:
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# Real clock for the scale's set-time command and reading timestamps (unix time, UTC).
+time:
+  - platform: sntp
+    id: sntp_time
+
+logger:
+  level: DEBUG
+  logs:
+    esp32_ble_tracker: INFO
+
+external_components:
+  - source:
+      type: local
+      path: components
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+  on_ble_advertise:
+    # The scale's MAC isn't known in advance (macOS hides it), so adopt the first BS1711-B we see.
+    - then:
+        - lambda: |-
+            if (id(scale_client).get_address() == 0 && x.get_name() == "BS1711-B") {
+              ESP_LOGI("ggscale", "Found scale at %s", x.address_str().c_str());
+              id(scale_client).set_address(x.address_uint64());
+            }
+
+ble_client:
+  - id: scale_client
+    mac_address: "00:00:00:00:00:00"  # replaced at runtime by the lambda above
+
+ggscale:
+  ble_client_id: scale_client
+  weight:
+    name: Baby weight
+  battery_level:
+    name: Scale battery
+  display_unit:
+    name: Scale display unit

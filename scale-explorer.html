@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Baby Scale Explorer</title>
+<style>
+/* Layout: one narrow control column over a full-width packet log. */
+:root {
+  --bg: #f6f7f5; --panel: #ffffff; --fg: #1d2420; --muted: #5d6a63; --line: #d9dfdb;
+  --accent: #1f7a5a; --accent-fg: #ffffff; --changed: #f3d36b; --changed-fg: #1d2420;
+  --warn: #9a5b00; --err: #b3261e; --ok: #1f7a5a;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131815; --panel: #1b221e; --fg: #e4ebe6; --muted: #9aa8a0; --line: #2d3832;
+    --accent: #4cc497; --accent-fg: #0d1511; --changed: #7a6420; --changed-fg: #fff4cc;
+    --warn: #e0a64a; --err: #ff8a80; --ok: #4cc497; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+main { max-width: 1200px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 16px; }
+h1 { font-size: 20px; margin: 0; }
+h2 { font-size: 13px; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+p { margin: 0; }
+.sub { color: var(--muted); }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+label { color: var(--muted); font-size: 12px; display: grid; gap: 4px; }
+input, textarea, select { font: 13px var(--mono); padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--fg); }
+textarea { width: 100%; min-height: 54px; resize: vertical; }
+button { font: 600 13px var(--sans); padding: 7px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.status { font-family: var(--mono); font-size: 12px; }
+.ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+.tree { font: 12px var(--mono); max-height: 320px; overflow: auto; }
+.tree div { padding: 2px 0; white-space: nowrap; }
+.tree .svc { font-weight: 700; margin-top: 6px; }
+.props { color: var(--muted); }
+.logwrap { overflow: auto; max-height: 60vh; border: 1px solid var(--line); border-radius: 6px; }
+table { border-collapse: collapse; width: 100%; font: 12px var(--mono); }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; }
+td.hex { white-space: normal; word-break: break-all; min-width: 260px; }
+td.dec { white-space: normal; color: var(--ok); }
+.b { padding: 0 1px; border-radius: 2px; }
+.b.c { background: var(--changed); color: var(--changed-fg); }
+.big { font: 700 34px var(--mono); font-variant-numeric: tabular-nums; }
+ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+code { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Baby Scale Explorer</h1>
+    <p class="sub">Connects to a Bluetooth LE scale from Chrome, lists every service and characteristic, subscribes to notifications and logs raw bytes. Built for the Greater Goods Smart Baby Scale (shows up as something like <code>BS1711-B</code>), but works on any BLE device.</p>
+    <p class="status" id="support"></p>
+  </header>
+
+  <div class="grid2">
+    <section>
+      <h2>1. Connect</h2>
+      <div style="display:grid; gap:10px">
+        <label for="namePrefix">Name starts with (blank shows every device)
+          <input id="namePrefix" placeholder="e.g. BS1711">
+        </label>
+        <label for="extraUuids">Extra service UUIDs to allow, comma separated (16-bit like 0xffb0 or full 128-bit)
+          <textarea id="extraUuids" placeholder="0d005750-c36b-11e3-9c1a-0800200c9a66"></textarea>
+        </label>
+        <label class="row" for="allMfr" style="display:flex"><input type="checkbox" id="allMfr" checked> Ask for manufacturer data from every company ID (needed to see broadcast weight)</label>
+        <div class="row">
+          <button class="primary" id="btnConnect">Pick device and connect</button>
+          <button id="btnPickOnly">Pick device only (no connect)</button>
+          <button id="btnDisconnect" disabled>Disconnect</button>
+        </div>
+        <div class="row">
+          <button id="btnAdv" disabled>Watch advertisements</button>
+          <button id="btnReadAll" disabled>Read all readable values</button>
+        </div>
+        <p class="status" id="connStatus">Not connected.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>2. Decode helpers</h2>
+      <div style="display:grid; gap:10px">
+        <div class="row">
+          <label for="knownVal">Known weight on the scale
+            <input id="knownVal" type="number" step="any" placeholder="e.g. 32.0" style="width:120px">
+          </label>
+          <label for="knownUnit">Unit
+            <select id="knownUnit"><option value="oz">oz</option><option value="lb">lb</option><option value="kg">kg</option><option value="g">g</option></select>
+          </label>
+          <label for="tol">Tolerance %
+            <input id="tol" type="number" step="any" value="2" style="width:70px">
+          </label>
+        </div>
+        <p class="sub">With a known weight entered (a water bottle you weighed on the scale's own display works well), each packet shows which bytes could hold that number. Bytes that changed since the previous packet from the same source are highlighted.</p>
+        <div>
+          <div class="sub">Last decoded weight (standard Weight Scale 0x2A9D, or your known-weight match)</div>
+          <div class="big" id="bigWeight">—</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section>
+      <h2>3. Services and characteristics</h2>
+      <div class="tree" id="tree"><span class="sub">Connect to see the GATT table.</span></div>
+    </section>
+    <section>
+      <h2>4. Write to a characteristic</h2>
+      <div style="display:grid; gap:10px">
+        <label for="writeChar">Characteristic
+          <select id="writeChar" disabled><option>Connect first</option></select>
+        </label>
+        <label for="writeHex">Bytes in hex
+          <input id="writeHex" placeholder="e.g. 02 a0 01">
+        </label>
+        <div class="row">
+          <button id="btnWrite" disabled>Write with response</button>
+          <button id="btnWriteNR" disabled>Write without response</button>
+        </div>
+        <p class="sub">Only needed if the scale stays silent until the app sends a start command. Try reads and notifications first.</p>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <div class="row" style="justify-content:space-between; margin-bottom:8px">
+      <h2 style="margin:0">5. Packet log</h2>
+      <div class="row">
+        <label class="row" for="onlyChanged" style="display:flex"><input type="checkbox" id="onlyChanged"> Hide repeats</label>
+        <button id="btnCopy">Copy log</button>
+        <button id="btnSave">Save log as JSON</button>
+        <button id="btnClear">Clear</button>
+      </div>
+    </div>
+    <div class="logwrap">
+      <table>
+        <thead><tr><th>Time</th><th>Kind</th><th>Source</th><th>Len</th><th>Hex</th><th>ASCII</th><th>Possible meaning</th></tr></thead>
+        <tbody id="log"></tbody>
+      </table>
+    </div>
+    <p class="sub" id="logCount" style="margin-top:6px">0 entries.</p>
+  </section>
+
+  <section>
+    <h2>How to capture</h2>
+    <ol>
+      <li>Close the GG app on your phone and turn the phone's Bluetooth off. Most of these scales accept only one connection, and the phone will grab it first.</li>
+      <li>Wake the scale (press a button or put something on it). The Bluetooth icon on its display should blink.</li>
+      <li>Click <b>Pick device and connect</b>, choose the scale in Chrome's list (try a blank name filter if nothing shows), and wait for the GATT table.</li>
+      <li>Put a known weight on the scale, enter it above, and press HOLD. Watch the log for notifications. Then try the scale's unit button and watch which bits flip.</li>
+      <li>If nothing arrives, click <b>Read all readable values</b>, then try <b>Watch advertisements</b> (needs <code>chrome://flags/#enable-experimental-web-platform-features</code> turned on).</li>
+      <li>Save the log as JSON and send it back. That file is enough to write the decoder.</li>
+    </ol>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const state = { device: null, server: null, chars: new Map(), log: [], last: new Map(), advAbort: null };
+
+// Friendly names for common UUIDs.
+const NAMES = {
+  "1800": "Generic Access", "1801": "Generic Attribute", "180a": "Device Information", "180f": "Battery",
+  "181d": "Weight Scale", "181b": "Body Composition", "181c": "User Data", "1805": "Current Time", "1810": "Blood Pressure",
+  "2a00": "Device Name", "2a01": "Appearance", "2a19": "Battery Level", "2a29": "Manufacturer", "2a24": "Model Number",
+  "2a25": "Serial Number", "2a26": "Firmware Rev", "2a27": "Hardware Rev", "2a28": "Software Rev", "2a23": "System ID",
+  "2a9d": "Weight Measurement", "2a9e": "Weight Scale Feature", "2a9c": "Body Composition Measurement", "2a2b": "Current Time",
+  "2a35": "Blood Pressure Measurement", "2902": "CCCD"
+};
+const TEXT_CHARS = new Set(["2a00", "2a29", "2a24", "2a25", "2a26", "2a27", "2a28"]);
+
+function short(uuid) {
+  const m = /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/i.exec(uuid);
+  return m ? m[1].toLowerCase() : uuid.toLowerCase();
+}
+function label(uuid) { const s = short(uuid); return NAMES[s] ? `${s} ${NAMES[s]}` : s; }
+function ts() { const d = new Date(); return d.toTimeString().slice(0, 8) + "." + String(d.getMilliseconds()).padStart(3, "0"); }
+function toBytes(dv) { return new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength); }
+function hex(bytes) { return Array.from(bytes, b => b.toString(16).padStart(2, "0")).join(" "); }
+function ascii(bytes) { return Array.from(bytes, b => (b >= 32 && b < 127) ? String.fromCharCode(b) : ".").join(""); }
+function parseUuid(s) {
+  s = s.trim().toLowerCase();
+  if (!s) return null;
+  if (/^0x[0-9a-f]{1,4}$/.test(s)) return parseInt(s, 16);
+  if (/^[0-9a-f]{4}$/.test(s)) return parseInt(s, 16);
+  return s;
+}
+
+function setStatus(el, text, cls) { el.textContent = text; el.className = "status " + (cls || ""); }
+
+// Support check.
+(function () {
+  const el = $("support");
+  if (!window.isSecureContext) {
+    setStatus(el, "This page is not in a secure context. Serve it from localhost: run  python3 -m http.server 8000  in its folder, then open http://localhost:8000/scale-explorer.html", "err");
+  } else if (!navigator.bluetooth) {
+    setStatus(el, "Web Bluetooth is not available here. Use desktop Chrome or Edge, and open this file directly rather than inside another app.", "err");
+  } else {
+    const adv = "watchAdvertisements" in BluetoothDevice.prototype;
+    setStatus(el, "Web Bluetooth available. Advertisement watching: " + (adv ? "available" : "off (enable chrome://flags/#enable-experimental-web-platform-features)"), adv ? "ok" : "warn");
+  }
+})();
+
+function optionalServices() {
+  const list = [];
+  for (let i = 0x1800; i <= 0x183f; i++) if (i !== 0x1812) list.push(i);           // standard services, minus HID (blocked)
+  for (let i = 0xfe00; i <= 0xffff; i++) if (i !== 0xfffd && i !== 0xfe59) list.push(i); // vendor and member ranges, minus blocked ones
+  list.push("6e400001-b5a3-f393-e0a9-e50e24dcca9e");                                  // Nordic UART
+  for (const s of $("extraUuids").value.split(",")) { const u = parseUuid(s); if (u !== null) list.push(u); }
+  return list;
+}
+
+async function requestDevice() {
+  const prefix = $("namePrefix").value.trim();
+  const base = prefix ? { filters: [{ namePrefix: prefix }] } : { acceptAllDevices: true };
+  const attempts = [];
+  const mfr = $("allMfr").checked ? Array.from({ length: 65536 }, (_, i) => i) : null;
+  attempts.push({ ...base, optionalServices: optionalServices(), ...(mfr ? { optionalManufacturerData: mfr } : {}) });
+  attempts.push({ ...base, optionalServices: optionalServices() });
+  attempts.push({ ...base, optionalServices: [0x180a, 0x180f, 0x181d, 0x181b, 0xffb0, 0xffe0, 0xfff0] });
+  let lastErr;
+  for (const opts of attempts) {
+    try { return await navigator.bluetooth.requestDevice(opts); }
+    catch (e) {
+      lastErr = e;
+      if (e.name === "NotFoundError" || e.name === "SecurityError") throw e; // user cancelled or blocked
+      addLog("info", "chooser", new Uint8Array(), "Retrying with fewer options: " + e.message);
+    }
+  }
+  throw lastErr;
+}
+
+async function pick(connect) {
+  try {
+    const device = await requestDevice();
+    state.device = device;
+    state.advHooked = false;
+    device.addEventListener("gattserverdisconnected", onDisconnected);
+    addLog("info", "chooser", new Uint8Array(), `Picked "${device.name || "(no name)"}" id ${device.id}`);
+    $("btnAdv").disabled = false;
+    $("btnDisconnect").disabled = false;
+    if (connect) await connectGatt();
+    else setStatus($("connStatus"), `Picked ${device.name || device.id}. Not connected.`, "warn");
+  } catch (e) {
+    setStatus($("connStatus"), e.name === "NotFoundError" ? "No device chosen." : `${e.name}: ${e.message}. If this keeps happening, untick the manufacturer data box and try again.`, "err");
+  }
+}
+
+async function connectGatt() {
+  const dev = state.device;
+  setStatus($("connStatus"), `Connecting to ${dev.name || dev.id}…`, "warn");
+  state.server = await dev.gatt.connect();
+  setStatus($("connStatus"), `Connected to ${dev.name || dev.id}. Reading GATT table…`, "ok");
+  await explore();
+  setStatus($("connStatus"), `Connected to ${dev.name || dev.id}. Subscribed to every notify/indicate characteristic.`, "ok");
+}
+
+async function explore() {
+  const tree = $("tree");
+  tree.innerHTML = "";
+  state.chars.clear();
+  const sel = $("writeChar");
+  sel.innerHTML = "";
+  let services = [];
+  try { services = await state.server.getPrimaryServices(); }
+  catch (e) { tree.textContent = "Could not list services: " + e.message; return; }
+  if (!services.length) tree.textContent = "No services visible. Add the scale's service UUID under Extra service UUIDs and reconnect.";
+  for (const svc of services) {
+    const sDiv = document.createElement("div");
+    sDiv.className = "svc";
+    sDiv.textContent = "Service " + label(svc.uuid) + (short(svc.uuid).length > 4 ? "" : `  (${svc.uuid})`);
+    tree.appendChild(sDiv);
+    let chars = [];
+    try { chars = await svc.getCharacteristics(); }
+    catch (e) { const d = document.createElement("div"); d.textContent = "   could not list: " + e.message; tree.appendChild(d); continue; }
+    for (const ch of chars) {
+      const key = short(svc.uuid) + "/" + short(ch.uuid);
+      state.chars.set(key, ch);
+      const p = ch.properties;
+      const props = ["read", "write", "writeWithoutResponse", "notify", "indicate"].filter(k => p[k]).join(" ");
+      const d = document.createElement("div");
+      d.innerHTML = `&nbsp;&nbsp;└ ${label(ch.uuid)} <span class="props">[${props}]</span>`;
+      tree.appendChild(d);
+      if (p.write || p.writeWithoutResponse) {
+        const o = document.createElement("option");
+        o.value = key; o.textContent = `${label(svc.uuid)} / ${label(ch.uuid)}`;
+        sel.appendChild(o);
+      }
+      if (p.notify || p.indicate) {
+        try {
+          ch.addEventListener("characteristicvaluechanged", ev => addLog(p.notify ? "notify" : "indicate", key, toBytes(ev.target.value)));
+          await ch.startNotifications();
+          addLog("info", key, new Uint8Array(), "Subscribed");
+        } catch (e) { addLog("info", key, new Uint8Array(), "Subscribe failed: " + e.message); }
+      }
+    }
+  }
+  const hasWrite = sel.options.length > 0;
+  sel.disabled = !hasWrite;
+  $("btnWrite").disabled = $("btnWriteNR").disabled = !hasWrite;
+  $("btnReadAll").disabled = false;
+  if (!hasWrite) sel.innerHTML = "<option>No writable characteristics</option>";
+  await readAll();
+}
+
+async function readAll() {
+  for (const [key, ch] of state.chars) {
+    if (!ch.properties.read) continue;
+    try { addLog("read", key, toBytes(await ch.readValue())); }
+    catch (e) { addLog("info", key, new Uint8Array(), "Read failed: " + e.message); }
+  }
+}
+
+function onDisconnected() {
+  setStatus($("connStatus"), "Disconnected. Wake the scale and click Pick device and connect again.", "warn");
+  addLog("info", "gatt", new Uint8Array(), "Disconnected");
+  $("btnReadAll").disabled = $("btnWrite").disabled = $("btnWriteNR").disabled = true;
+}
+
+async function watchAdv() {
+  const dev = state.device;
+  if (!dev) return;
+  if (!dev.watchAdvertisements) {
+    setStatus($("connStatus"), "Advertisement watching is off. Turn on chrome://flags/#enable-experimental-web-platform-features and restart Chrome.", "err");
+    return;
+  }
+  if (state.advAbort) { state.advAbort.abort(); state.advAbort = null; $("btnAdv").textContent = "Watch advertisements"; return; }
+  if (!state.advHooked) { state.advHooked = true; dev.addEventListener("advertisementreceived", ev => {
+    let any = false;
+    ev.manufacturerData.forEach((dv, company) => {
+      any = true;
+      addLog("adv", `mfr 0x${company.toString(16).padStart(4, "0")} rssi ${ev.rssi}`, toBytes(dv));
+    });
+    ev.serviceData.forEach((dv, uuid) => { any = true; addLog("adv", `svcdata ${label(uuid)} rssi ${ev.rssi}`, toBytes(dv)); });
+    if (!any) addLog("adv", `rssi ${ev.rssi}`, new Uint8Array(), `name ${ev.name || "-"}, uuids ${ev.uuids.map(short).join(" ") || "-"}`);
+  }); }
+  state.advAbort = new AbortController();
+  try {
+    await dev.watchAdvertisements({ signal: state.advAbort.signal });
+    $("btnAdv").textContent = "Stop watching advertisements";
+    addLog("info", "adv", new Uint8Array(), "Watching advertisements. Put weight on the scale.");
+  } catch (e) {
+    state.advAbort = null;
+    setStatus($("connStatus"), "Could not watch advertisements: " + e.message, "err");
+  }
+}
+
+async function doWrite(withResponse) {
+  const key = $("writeChar").value;
+  const ch = state.chars.get(key);
+  const clean = $("writeHex").value.replace(/0x/gi, "").replace(/[^0-9a-f]/gi, "");
+  if (!ch || !clean || clean.length % 2) { setStatus($("connStatus"), "Enter an even number of hex digits.", "err"); return; }
+  const bytes = new Uint8Array(clean.match(/../g).map(h => parseInt(h, 16)));
+  try {
+    if (withResponse && ch.writeValueWithResponse) await ch.writeValueWithResponse(bytes);
+    else if (!withResponse && ch.writeValueWithoutResponse) await ch.writeValueWithoutResponse(bytes);
+    else await ch.writeValue(bytes);
+    addLog("write", key, bytes);
+  } catch (e) { addLog("info", key, bytes, "Write failed: " + e.message); }
+}
+
+// Decoding.
+const TO_KG = { kg: 1, lb: 0.45359237, oz: 0.028349523125, g: 0.001 };
+
+function standardDecode(src, b) {
+  const c = src.split("/").pop();
+  if (c === "2a9d" && b.length >= 3) {
+    const imperial = b[0] & 1;
+    const raw = b[1] | (b[2] << 8);
+    const v = imperial ? raw * 0.01 : raw * 0.005;
+    const txt = imperial ? `${v.toFixed(2)} lb` : `${v.toFixed(3)} kg`;
+    $("bigWeight").textContent = txt;
+    return `Weight Measurement: ${txt}`;
+  }
+  if (c === "2a19" && b.length >= 1) return `Battery ${b[0]}%`;
+  if (TEXT_CHARS.has(c)) return `"${new TextDecoder().decode(b)}"`;
+  return "";
+}
+
+function knownMatches(b) {
+  const val = parseFloat($("knownVal").value);
+  if (!isFinite(val) || val <= 0 || b.length < 2) return "";
+  const targetKg = val * TO_KG[$("knownUnit").value];
+  const tol = (parseFloat($("tol").value) || 2) / 100;
+  const hits = [];
+  const ints = [];
+  for (let i = 0; i + 1 < b.length; i++) {
+    ints.push([i, 2, "LE", b[i] | (b[i + 1] << 8)]);
+    ints.push([i, 2, "BE", (b[i] << 8) | b[i + 1]]);
+    if (i + 2 < b.length) {
+      ints.push([i, 3, "LE", b[i] | (b[i + 1] << 8) | (b[i + 2] << 16)]);
+      ints.push([i, 3, "BE", (b[i] << 16) | (b[i + 1] << 8) | b[i + 2]]);
+    }
+  }
+  for (const [off, len, end, raw] of ints) {
+    if (raw === 0) continue;
+    for (const div of [1, 10, 100, 1000]) {
+      for (const unit of ["kg", "lb", "oz", "g"]) {
+        const kg = raw / div * TO_KG[unit];
+        if (Math.abs(kg - targetKg) / targetKg <= tol) hits.push(`bytes ${off}-${off + len - 1} ${end} /${div} = ${(raw / div)} ${unit}`);
+      }
+    }
+  }
+  if (hits.length) $("bigWeight").textContent = hits[0].split("= ")[1];
+  return hits.slice(0, 6).join("; ") + (hits.length > 6 ? ` (+${hits.length - 6} more)` : "");
+}
+
+function addLog(kind, src, bytes, note) {
+  const prev = state.last.get(src);
+  const same = prev && prev.length === bytes.length && prev.every((v, i) => v === bytes[i]);
+  if (bytes.length) state.last.set(src, bytes.slice());
+  const entry = { time: new Date().toISOString(), kind, source: src, hex: hex(bytes), note: note || "" };
+  state.log.push(entry);
+  $("logCount").textContent = `${state.log.length} entries.`;
+  if (same && $("onlyChanged").checked) return;
+
+  const tr = document.createElement("tr");
+  const meaning = note || [standardDecode(src, bytes), knownMatches(bytes)].filter(Boolean).join(" | ");
+  const hexHtml = Array.from(bytes, (v, i) => {
+    const changed = prev && (i >= prev.length || prev[i] !== v);
+    return `<span class="b${changed ? " c" : ""}">${v.toString(16).padStart(2, "0")}</span>`;
+  }).join(" ");
+  const cells = [ts(), kind, src, String(bytes.length)];
+  for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); }
+  const tdHex = document.createElement("td"); tdHex.className = "hex"; tdHex.innerHTML = hexHtml; tr.appendChild(tdHex);
+  const tdA = document.createElement("td"); tdA.textContent = ascii(bytes); tr.appendChild(tdA);
+  const tdM = document.createElement("td"); tdM.className = "dec"; tdM.textContent = meaning; tr.appendChild(tdM);
+  const body = $("log");
+  body.insertBefore(tr, body.firstChild);
+  while (body.children.length > 2000) body.removeChild(body.lastChild);
+}
+
+function logText() {
+  return state.log.map(e => `${e.time}\t${e.kind}\t${e.source}\t${e.hex}\t${e.note}`).join("\n");
+}
+
+$("btnConnect").onclick = () => pick(true);
+$("btnPickOnly").onclick = () => pick(false);
+$("btnDisconnect").onclick = () => { if (state.device && state.device.gatt.connected) state.device.gatt.disconnect(); };
+$("btnAdv").onclick = watchAdv;
+$("btnReadAll").onclick = readAll;
+$("btnWrite").onclick = () => doWrite(true);
+$("btnWriteNR").onclick = () => doWrite(false);
+$("btnClear").onclick = () => { state.log = []; state.last.clear(); $("log").innerHTML = ""; $("logCount").textContent = "0 entries."; };
+$("btnCopy").onclick = async () => {
+  try { await navigator.clipboard.writeText(logText()); setStatus($("connStatus"), "Log copied.", "ok"); }
+  catch (e) { setStatus($("connStatus"), "Copy failed: " + e.message, "err"); }
+};
+$("btnSave").onclick = () => {
+  const meta = { device: state.device ? { name: state.device.name, id: state.device.id } : null, saved: new Date().toISOString() };
+  const blob = new Blob([JSON.stringify({ meta, log: state.log }, null, 1)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "baby-scale-log-" + Date.now() + ".json";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+};
+</script>
+</body>
+</html>

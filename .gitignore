@@ -1,0 +1,10 @@
+.venv/
+apk-untrusted/
+decomp-*.java
+__pycache__/
+adv-capture-1.txt
+captures/
+
+# ESPHome build output
+esphome/.esphome/
+esphome/secrets.yaml

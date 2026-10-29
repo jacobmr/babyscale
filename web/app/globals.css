@@ -1,0 +1,52 @@
+:root {
+  --bg: #faf9f6; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --line: #e4e2dc;
+  --grid: #eeece6; --accent: #d4573b; --curve: #a9a6a0; --curve-mid: #7d7a74;
+  --ok: #2f7d4a; --error: #b3261e;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161615; --card: #201f1e; --text: #ecebe8; --muted: #9c9a95; --line: #34322f;
+    --grid: #2b2a28; --accent: #f0805f; --curve: #6d6b67; --curve-mid: #9c9a95;
+    --ok: #6fca8c; --error: #f2877f;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+main { max-width: 640px; margin: 0 auto; padding: 24px 16px 64px; }
+h1 { font-size: 1.6rem; margin: 0 0 12px; }
+h2 { font-size: 1.05rem; margin: 0 0 12px; }
+a { color: var(--accent); }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 16px 0; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; gap: 12px; }
+.row > label { flex: 1; }
+label { display: flex; flex-direction: column; gap: 4px; font-size: 0.9rem; color: var(--muted); }
+input, select {
+  font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; padding: 10px; width: 100%; min-width: 0;
+}
+button {
+  font: inherit; border: 0; border-radius: 8px; padding: 10px 16px; cursor: pointer;
+  background: var(--accent); color: #fff; font-weight: 600;
+}
+button:disabled { opacity: 0.6; }
+button.link { background: none; color: var(--accent); padding: 0; font-weight: 400; font-size: 0.9rem; }
+button.danger { color: var(--error); }
+.big { font-size: 2.2rem; font-weight: 700; margin: 0; }
+.muted { color: var(--muted); margin: 4px 0; }
+.small { font-size: 0.85rem; }
+.ok { color: var(--ok); margin: 0; }
+.error { color: var(--error); margin: 0; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 8px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+tr:first-child td { border-top: 0; }
+.copy { display: flex; gap: 8px; }
+code { font-size: 0.85em; word-break: break-all; }
+summary { cursor: pointer; font-weight: 600; }
+details[open] summary { margin-bottom: 12px; }
+.chart { margin: 0 -8px; }
