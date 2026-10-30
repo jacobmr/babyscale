@@ -23,6 +23,11 @@ esp32_ble:
 
 captive_portal:
 
+# HTTPS to the web app; ESP-IDF checks the server certificate against its built-in CA bundle.
+http_request:
+  verify_ssl: true
+  timeout: 10s
+
 ota:
   - platform: esphome
     password: !secret ota_password
@@ -62,6 +67,23 @@ ggscale:
   ble_client_id: scale_client
   weight:
     name: Baby weight
+    # Send each reading to the web app. It merges readings within 120 s, so a settling scale
+    # makes one entry. measured_at before SNTP sync is ~1970; the server then uses its own clock.
+    on_value:
+      then:
+        - http_request.post:
+            url: https://babyscale.vercel.app/api/ingest
+            request_headers:
+              Authorization: !secret ingest_auth
+              Content-Type: application/json
+            json: |-
+              root["grams"] = (int) x;
+              root["measured_at"] = id(sntp_time).now().timestamp;
+            on_response:
+              then:
+                - logger.log:
+                    format: "ingest -> HTTP %d"
+                    args: [response->status_code]
   battery_level:
     name: Scale battery
   display_unit:

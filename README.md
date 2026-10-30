@@ -1,7 +1,7 @@
 # babyscale
 
 Get readings off a **Greater Goods Smart Baby Scale (BS1711-B)** without the vendor app. A small ESP32
-board sits next to the scale, reads each weighing over Bluetooth, and (soon) posts it to a simple web
+board sits next to the scale, reads each weighing over Bluetooth, and posts it to a simple web
 app that keeps a growth chart you can share with family.
 
 - `esphome/`: firmware for the bridge (ESPHome on an M5Stack NanoC6).
@@ -9,9 +9,8 @@ app that keeps a growth chart you can share with family.
 - `PROTOCOL.md`: the scale's BLE protocol, reverse-engineered.
 - `ggscale.py`, `scale_cli.py`: read the scale from a laptop (Python + bleak).
 
-> **Status:** the bridge joins Wi-Fi and reads weights from the scale over Bluetooth. Sending those readings to the
-> web app is the next feature (`POST /api/ingest` already exists on the app side). Until then, add
-> weights in the web app by hand.
+> **Status:** working end to end: scale → bridge (Bluetooth) → web app (HTTPS). Tested with one
+> scale and one bridge.
 
 Not affiliated with Greater Goods. Use at your own risk; this is a hobby project.
 
@@ -32,8 +31,10 @@ You do this once, from a Mac, Linux, or Windows computer.
 
 1. Install ESPHome: `pip install esphome` (Python 3.11+).
 2. Get the code: `git clone https://github.com/jacobmr/babyscale && cd babyscale/esphome`
-3. Make your secrets file: `cp secrets.example.yaml secrets.yaml`, then set `ota_password` to any
-   random string (it protects over-the-air updates). `secrets.yaml` is gitignored.
+3. Make your secrets file: `cp secrets.example.yaml secrets.yaml`, then set:
+   - `ota_password`: any random string (it protects over-the-air updates);
+   - `ingest_auth`: `"Bearer <device token>"`, with the token from your baby's page in the web app.
+   `secrets.yaml` is gitignored. Self-hosting the app? Change the `url:` in `babyscale-bridge.yaml`.
 4. Plug the NanoC6 into the computer with USB-C.
 5. Build and flash: `esphome run babyscale-bridge.yaml`. Pick the USB serial port when asked
    (on a Mac it looks like `/dev/cu.usbmodem…`). The first build takes several minutes.
