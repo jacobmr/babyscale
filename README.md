@@ -19,7 +19,7 @@ Not affiliated with Greater Goods. A hobby project, not a medical device.
 | Part | Notes |
 | --- | --- |
 | Greater Goods Smart Baby Scale, model 0220 (Bluetooth name `BS1711-B`) | Other Lifesense/Transtek "A6" scales may work; untested. |
-| [M5Stack NanoC6](https://docs.m5stack.com/en/core/M5NanoC6) (ESP32-C6) | About $8. Its RGB LED shows status. Other ESP32 boards with BLE should work if you change the `esp32:` and LED blocks. |
+| [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit?srsltid=AYCX9vL8IYqvV6n4b0KzDs7S295zRD6oEMR9iYZkYQlE-6ntetOdClfd) (ESP32-C6) | About $8. Its RGB LED shows status. Other ESP32 boards with BLE should work if you change the `esp32:` and LED blocks. |
 | USB-C cable and a 5 V USB phone charger | Powers the bridge. Data-capable cable for the first flash. |
 | A 2.4 GHz Wi-Fi network | The ESP32 can't use 5 GHz. |
 
