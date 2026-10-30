@@ -1,0 +1,8 @@
+# Local-only build: the published firmware plus LAN OTA (password from secrets.yaml), for
+# flashing over Wi-Fi from a dev machine. Never published: the binary contains the password.
+packages:
+  bridge: !include babyscale-bridge.yaml
+
+ota:
+  - platform: esphome
+    password: !secret ota_password

@@ -17,3 +17,25 @@ export function percentileCurves(sex: "girl" | "boy") {
     return row;
   });
 }
+
+// LMS for an age in months (0-24), interpolated between the monthly WHO rows.
+function lmsAt(sex: "girl" | "boy", months: number): [number, number, number] {
+  const rows = WHO_WFA[sex];
+  const m = Math.max(0, Math.min(rows.length - 1, months));
+  const i = Math.min(rows.length - 2, Math.floor(m));
+  const f = m - i;
+  const [, L0, M0, S0] = rows[i];
+  const [, L1, M1, S1] = rows[i + 1];
+  return [L0 + (L1 - L0) * f, M0 + (M1 - M0) * f, S0 + (S1 - S0) * f];
+}
+
+// z-score of a weight (kg) at an age, and the weight at a z-score: the WHO LMS formulas.
+export function zScore(sex: "girl" | "boy", months: number, kg: number): number {
+  const [L, M, S] = lmsAt(sex, months);
+  return L === 0 ? Math.log(kg / M) / S : (Math.pow(kg / M, L) - 1) / (L * S);
+}
+
+export function kgAtZ(sex: "girl" | "boy", months: number, z: number): number {
+  const [L, M, S] = lmsAt(sex, months);
+  return atZ(L, M, S, z);
+}

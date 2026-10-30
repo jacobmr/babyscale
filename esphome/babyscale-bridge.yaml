@@ -1,9 +1,100 @@
 # M5Stack NanoC6 (ESP32-C6) bridge for the Greater Goods baby scale (BS1711-B).
 # Wi-Fi is set on site: with no saved network the M5 opens hotspot "babyscale-bridge".
 # Join it from a phone (no password) and pick the home network.
-# Build needs secrets.yaml (gitignored): decrypt secrets.enc.yaml with sops first.
+# No secrets are compiled in: Wi-Fi is set on site, and updates arrive over HTTPS from the app
+# (GitHub Actions builds each version; see .github/workflows/firmware.yml).
+# LED (NanoC6 RGB): blue = connected to the scale, green flash = reading saved, red flash = upload failed.
+substitutions:
+  fw_version: "dev"  # CI passes -s fw_version 2.1.<run>; "dev" builds update to the published one
+
 esphome:
   name: babyscale-bridge
+  project:
+    name: jacobmr.babyscale-bridge
+    version: ${fw_version}
+
+  # The bridge's own key, made once on first boot and kept in flash. The app trusts the first key
+  # a bridge sends, so readings can't be forged by someone who only knows the MAC.
+  on_boot:
+    priority: 600
+    then:
+      - lambda: |-
+          if (id(key_hi) == 0 && id(key_lo) == 0) {
+            id(key_hi) = ((uint64_t) random_uint32() << 32) | random_uint32();
+            id(key_lo) = ((uint64_t) random_uint32() << 32) | random_uint32();
+          }
+      # Globals save on the next loop; then write flash now, not at the 60 s flush:
+      # a lost key would lock the bridge out.
+      - delay: 2s
+      - lambda: global_preferences->sync();
+      - output.turn_on: led_power
+
+globals:
+  - id: key_hi
+    type: uint64_t
+    restore_value: true
+    initial_value: "0"
+  - id: key_lo
+    type: uint64_t
+    restore_value: true
+    initial_value: "0"
+
+script:
+  # The scale sends one measurement record after it auto-holds a steady weight; post it right away.
+  # A repeat within 120 s merges into the same entry on the server.
+  - id: post_weight
+    mode: queued
+    then:
+      - http_request.post:
+          url: https://babyscale.vercel.app/api/ingest
+          request_headers:
+            Content-Type: application/json
+          json: |-
+            char key[33];
+            snprintf(key, sizeof key, "%016llx%016llx", (unsigned long long) id(key_hi), (unsigned long long) id(key_lo));
+            root["bridge_id"] = get_mac_address();
+            root["key"] = key;
+            root["grams"] = (int) id(weight_sensor).state;
+            root["measured_at"] = id(sntp_time).now().timestamp;
+            root["version"] = "${fw_version}";
+          on_response:
+            then:
+              - logger.log:
+                  level: INFO
+                  format: "ingest %d g -> HTTP %d"
+                  args: ["(int) id(weight_sensor).state", response->status_code]
+              - if:
+                  condition:
+                    lambda: return response->status_code >= 200 && response->status_code < 300;
+                  then:
+                    - script.execute: { id: flash_led, red: 0.0, green: 1.0, blue: 0.0 }
+                  else:
+                    - script.execute: { id: flash_led, red: 1.0, green: 0.0, blue: 0.0 }
+          on_error:
+            then:
+              - script.execute: { id: flash_led, red: 1.0, green: 0.0, blue: 0.0 }
+
+  # Shows a color for 3 s, then the steady state: blue while connected to the scale, else off.
+  - id: flash_led
+    mode: restart
+    parameters:
+      red: float
+      green: float
+      blue: float
+    then:
+      - light.turn_on: { id: status_led, red: !lambda return red;, green: !lambda return green;, blue: !lambda return blue;, brightness: 60%, transition_length: 0s }
+      - delay: 3s
+      - script.execute: led_idle
+
+  - id: led_idle
+    then:
+      - if:
+          condition:
+            lambda: return id(scale_client).connected();
+          then:
+            - light.turn_on: { id: status_led, red: 0.0, green: 0.0, blue: 1.0, brightness: 25%, transition_length: 0s }
+          else:
+            - light.turn_off: { id: status_led, transition_length: 0s }
 
 esp32:
   variant: esp32c6
@@ -29,8 +120,28 @@ http_request:
   timeout: 10s
 
 ota:
-  - platform: esphome
-    password: !secret ota_password
+  - platform: http_request
+
+# Every 6 h: if the app publishes a newer version, install it.
+update:
+  - platform: http_request
+    id: fw_update
+    name: Firmware
+    source: https://babyscale.vercel.app/firmware/manifest.json
+    update_interval: 6h
+
+interval:
+  - interval: 6h
+    startup_delay: 2min
+    then:
+      - component.update: fw_update
+      - delay: 30s
+      - if:
+          condition:
+            update.is_available: fw_update
+          then:
+            - logger.log: { level: INFO, format: "Installing firmware update" }
+            - update.perform: fw_update
 
 # Real clock for the scale's set-time command and reading timestamps (unix time, UTC).
 time:
@@ -38,7 +149,7 @@ time:
     id: sntp_time
 
 logger:
-  level: DEBUG
+  level: INFO
   logs:
     esp32_ble_tracker: INFO
 
@@ -62,28 +173,34 @@ esp32_ble_tracker:
 ble_client:
   - id: scale_client
     mac_address: "00:00:00:00:00:00"  # replaced at runtime by the lambda above
+    on_connect:
+      - script.execute: led_idle
+    on_disconnect:
+      - script.execute: led_idle
+
+# NanoC6 RGB LED: WS2812 on GPIO20, powered through GPIO19.
+output:
+  - platform: gpio
+    id: led_power
+    pin: GPIO19
+
+light:
+  - platform: esp32_rmt_led_strip
+    id: status_led
+    internal: true
+    pin: GPIO20
+    num_leds: 1
+    chipset: WS2812
+    rgb_order: GRB
+    default_transition_length: 0s
 
 ggscale:
   ble_client_id: scale_client
   weight:
+    id: weight_sensor
     name: Baby weight
-    # Send each reading to the web app. It merges readings within 120 s, so a settling scale
-    # makes one entry. measured_at before SNTP sync is ~1970; the server then uses its own clock.
     on_value:
-      then:
-        - http_request.post:
-            url: https://babyscale.vercel.app/api/ingest
-            request_headers:
-              Authorization: !secret ingest_auth
-              Content-Type: application/json
-            json: |-
-              root["grams"] = (int) x;
-              root["measured_at"] = id(sntp_time).now().timestamp;
-            on_response:
-              then:
-                - logger.log:
-                    format: "ingest -> HTTP %d"
-                    args: [response->status_code]
+      - script.execute: post_weight
   battery_level:
     name: Scale battery
   display_unit:

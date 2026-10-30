@@ -2,12 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 const MAX_AGE = 400 * 24 * 60 * 60;
 
-// Sliding expiry: every visit pushes each editor cookie out another 400 days.
+// Sliding expiry: every visit pushes the session cookie out another 400 days.
 export function middleware(req: NextRequest) {
   const res = NextResponse.next();
-  for (const c of req.cookies.getAll()) {
-    if (!c.name.startsWith("bs_")) continue;
-    res.cookies.set(c.name, c.value, {
+  const session = req.cookies.get("bs_session");
+  if (session) {
+    res.cookies.set(session.name, session.value, {
       httpOnly: true,
       secure: req.nextUrl.protocol === "https:",
       sameSite: "lax",
@@ -18,4 +18,4 @@ export function middleware(req: NextRequest) {
   return res;
 }
 
-export const config = { matcher: ["/b/:path*"] };
+export const config = { matcher: ["/((?!api|_next|favicon).*)"] };

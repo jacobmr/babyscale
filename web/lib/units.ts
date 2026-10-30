@@ -14,5 +14,7 @@ export function ageLabel(birthDate: string, at: Date): string {
   if (days < 0) return "before birth";
   if (days < 14) return `${days} d`;
   if (days < 120) return `${Math.floor(days / 7)} wk ${days % 7} d`;
-  return `${(days / 30.4375).toFixed(1)} mo`;
+  const months = Math.floor(days / 30.4375);
+  if (months < 24) return `${months} mo`;
+  return `${Math.floor(months / 12)} y ${months % 12} mo`;
 }

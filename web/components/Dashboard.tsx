@@ -31,7 +31,7 @@ export default function Dashboard({
       </section>
 
       <section className="card">
-        <h2>Growth chart</h2>
+        <h2>{baby.sex === "unspecified" ? "Weight over time" : "Growth chart"}</h2>
         <GrowthChart
           birthDate={baby.birth_date} sex={baby.sex} units={baby.units}
           points={entries.map((e) => ({ grams: e.grams, at: e.measured_at.toISOString() }))}

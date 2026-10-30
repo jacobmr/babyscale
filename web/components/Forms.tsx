@@ -14,8 +14,8 @@ function Status({ state }: { state: FormState }) {
 export function CreateBabyForm({ action }: { action: Action }) {
   const [state, run, pending] = useActionState(action, undefined);
   return (
-    <form action={run} className="card stack">
-      <label>Baby&apos;s name<input name="name" required maxLength={60} autoComplete="off" /></label>
+    <form action={run} className="stack">
+      <label>Name<input name="name" required maxLength={60} autoComplete="off" /></label>
       <label>Birth date<input name="birth_date" type="date" required /></label>
       <label>
         Growth chart (WHO curves differ by sex)
@@ -32,22 +32,19 @@ export function CreateBabyForm({ action }: { action: Action }) {
           <option value="kg">kg</option>
         </select>
       </label>
-      <label>
-        Password for adding and editing weights
-        <input name="password" type="password" required minLength={4} autoComplete="new-password" />
-      </label>
       <button disabled={pending}>{pending ? "Creating…" : "Create"}</button>
       <Status state={state} />
     </form>
   );
 }
 
-export function PasswordForm({ action, label, button }: { action: Action; label: string; button: string }) {
+export function EmailForm({ action, label, button, next }: { action: Action; label: string; button: string; next?: string }) {
   const [state, run, pending] = useActionState(action, undefined);
   return (
     <form action={run} className="stack">
-      <label>{label}<input name="password" type="password" required minLength={4} /></label>
-      <button disabled={pending}>{button}</button>
+      <label>{label}<input name="email" type="email" required autoComplete="email" inputMode="email" /></label>
+      {next && <input type="hidden" name="next" value={next} />}
+      <button disabled={pending}>{pending ? "Sending…" : button}</button>
       <Status state={state} />
     </form>
   );
@@ -97,5 +94,33 @@ export function CopyField({ value }: { value: string }) {
         {copied ? "Copied" : "Copy"}
       </button>
     </div>
+  );
+}
+
+export function ImportForm({ action }: { action: Action }) {
+  const [state, run, pending] = useActionState(action, undefined);
+  return (
+    <form action={run} className="stack">
+      <label>
+        Import a CSV export (for example from the Greater Goods app)
+        <input name="file" type="file" accept=".csv,text/csv" required />
+      </label>
+      <button disabled={pending}>{pending ? "Importing…" : "Import"}</button>
+      <Status state={state} />
+    </form>
+  );
+}
+
+export function DeleteForm({ action, name }: { action: Action; name: string }) {
+  const [state, run, pending] = useActionState(action, undefined);
+  return (
+    <form action={run} className="stack">
+      <label>
+        Delete {name} and all weights. Type <strong>{name}</strong> to confirm.
+        <input name="confirm" autoComplete="off" required />
+      </label>
+      <button className="danger-button" disabled={pending}>Delete permanently</button>
+      <Status state={state} />
+    </form>
   );
 }

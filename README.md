@@ -1,25 +1,25 @@
 # babyscale
 
 Get readings off a **Greater Goods Smart Baby Scale (BS1711-B)** without the vendor app. A small ESP32
-board sits next to the scale, reads each weighing over Bluetooth, and posts it to a simple web
-app that keeps a growth chart you can share with family.
+board sits next to the scale, reads each weighing over Bluetooth, and posts it to a web app that keeps
+a growth chart you can share with family.
 
 - `esphome/`: firmware for the bridge (ESPHome on an M5Stack NanoC6).
-- `web/`: the weight-tracking web app (Next.js + Postgres). A hosted copy runs at https://babyscale.vercel.app.
+- `web/`: the weight-tracking web app (Next.js + Postgres). A hosted copy runs at https://www.babyscale.org.
 - `PROTOCOL.md`: the scale's BLE protocol, reverse-engineered.
 - `ggscale.py`, `scale_cli.py`: read the scale from a laptop (Python + bleak).
 
-> **Status:** working end to end: scale → bridge (Bluetooth) → web app (HTTPS). Tested with one
-> scale and one bridge.
+> **Status:** working end to end: scale → bridge (Bluetooth) → web app (HTTPS) → phone notification.
+> The bridge updates its own firmware over the air. Tested with one scale and one bridge.
 
-Not affiliated with Greater Goods. Use at your own risk; this is a hobby project.
+Not affiliated with Greater Goods. A hobby project, not a medical device.
 
 ## What you need
 
 | Part | Notes |
 | --- | --- |
 | Greater Goods Smart Baby Scale, model 0220 (Bluetooth name `BS1711-B`) | Other Lifesense/Transtek "A6" scales may work; untested. |
-| [M5Stack NanoC6](https://docs.m5stack.com/en/core/M5NanoC6) (ESP32-C6) | About $8. Any ESP32 with BLE should work if you change the `esp32:` block. |
+| [M5Stack NanoC6](https://docs.m5stack.com/en/core/M5NanoC6) (ESP32-C6) | About $8. Its RGB LED shows status. Other ESP32 boards with BLE should work if you change the `esp32:` and LED blocks. |
 | USB-C cable and a 5 V USB phone charger | Powers the bridge. Data-capable cable for the first flash. |
 | A 2.4 GHz Wi-Fi network | The ESP32 can't use 5 GHz. |
 
@@ -27,20 +27,23 @@ Put the bridge within a few metres of the scale and in reach of Wi-Fi.
 
 ## Flash the firmware
 
-You do this once, from a Mac, Linux, or Windows computer.
+You do this once, from a Mac, Linux, or Windows computer. No secrets are compiled in.
 
 1. Install ESPHome: `pip install esphome` (Python 3.11+).
 2. Get the code: `git clone https://github.com/jacobmr/babyscale && cd babyscale/esphome`
-3. Make your secrets file: `cp secrets.example.yaml secrets.yaml`, then set:
-   - `ota_password`: any random string (it protects over-the-air updates);
-   - `ingest_auth`: `"Bearer <device token>"`, with the token from your baby's page in the web app.
-   `secrets.yaml` is gitignored. Self-hosting the app? Change the `url:` in `babyscale-bridge.yaml`.
-4. Plug the NanoC6 into the computer with USB-C.
-5. Build and flash: `esphome run babyscale-bridge.yaml`. Pick the USB serial port when asked
+3. Plug the NanoC6 into the computer with USB-C.
+4. Build and flash: `esphome run babyscale-bridge.yaml`. Pick the USB serial port when asked
    (on a Mac it looks like `/dev/cu.usbmodem…`). The first build takes several minutes.
    - If no port shows up: unplug, hold the NanoC6's button, plug back in, release. That puts it in
      download mode.
-6. Later updates can go over Wi-Fi: `esphome run babyscale-bridge.yaml --device babyscale-bridge.local`.
+
+After that, the bridge keeps itself up to date: 2 minutes after boot and every 6 hours it checks
+`https://babyscale.vercel.app/firmware/manifest.json` and installs a newer version. Self-hosting? Point
+the `update:` `source:` and the `post_weight` `url:` in `babyscale-bridge.yaml` at your own app.
+
+Flashing over Wi-Fi during development: copy `secrets.example.yaml` to `secrets.yaml`, set
+`ota_password`, and use `esphome run babyscale-bridge-lan.yaml --device babyscale-bridge.local`
+(that build adds a password-protected LAN update port; don't publish it).
 
 ## Set up the bridge at home
 
@@ -49,35 +52,46 @@ You do this once, from a Mac, Linux, or Windows computer.
    doesn't, browse to `http://192.168.4.1`.
 3. Pick your home network, type its password, and save. The bridge reboots onto your network and the
    setup hotspot disappears.
-4. Put the baby (or anything over 4 lb) on the scale and hold it steady for about 30 s.
-   The bridge finds the scale on its own: it adopts the first `BS1711-B` it hears.
+4. Weigh something over 4 lb. The bridge finds the scale on its own (it adopts the first `BS1711-B`
+   it hears) and sends the reading as soon as the scale holds it.
+5. In the web app, open **Your babies**: the bridge shows up under "Scale bridge". Tap
+   **This is my bridge**. The reading you just made is waiting in the inbox.
+
+The LED: **blue** while connected to the scale, a **green** flash when a reading is saved, a **red**
+flash if the upload failed.
 
 Notes:
 - Only one Bluetooth device can talk to the scale at a time. Close the Greater Goods app (or turn off
   the phone's Bluetooth) while the bridge is in use.
 - The scale sleeps after about a minute; it wakes on weight or its button, and the bridge reconnects.
-- Watch the logs with `esphome logs babyscale-bridge.yaml`.
+- Logs: `esphome logs babyscale-bridge.yaml` with the bridge on USB.
 
 ## The web app
 
-Open https://babyscale.vercel.app, create a baby, and choose a password. That browser stays signed in
-(a 400-day cookie). From the baby's page you can:
+Sign in at https://www.babyscale.org with your email: you get a one-time link, and that browser stays
+signed in (a 400-day cookie, renewed on each visit). Then:
 
-- add weights by hand (lb + oz or kg);
-- see a WHO weight-for-age chart (0–24 months, 3rd–97th percentiles);
-- copy a **read-only share link** for family;
-- find the **device token** for the bridge under "Scale bridge and settings".
+- **Add a baby or pet.** Babies get WHO weight-for-age curves (0–24 months); pets ("no percentile
+  curves") get a dated weight chart.
+- **Inbox.** Each scale reading lands at the top of "Your babies" with a button per baby or pet. The
+  likely one is highlighted: for a baby, the weight projected along its own WHO percentile; for a pet,
+  its last weight. One tap saves it. Unsaved readings are archived after 7 days.
+- **Notifications.** "Notify me on this device" sends a push for each reading. iPhone: add the site to
+  the home screen first (Share → Add to Home Screen) and turn it on from there.
+- **Add weights by hand**, or **import a CSV** (the Greater Goods app's export works as-is).
+- **Share** a read-only link, or **add people by email** so they can log weights too.
 
-The bridge (or anything else) can post readings:
+### Ingest API
+
+The bridge posts each reading:
 
 ```
 POST /api/ingest
-Authorization: Bearer <device token>
-{"grams": 3160, "measured_at": 1793278648}
+{"bridge_id": "<MAC>", "key": "<32 hex>", "grams": 3160, "measured_at": 1793278648, "version": "2.1.1"}
 ```
 
-Readings from the device within 120 s of each other merge into one entry, so a settling scale makes
-one data point.
+The bridge makes its key once, on first boot; the server trusts the first key it sees for that MAC.
+Readings within 120 s from the same bridge merge into one.
 
 ### Run your own copy
 
@@ -86,13 +100,21 @@ Needs Node 20+, pnpm, and a Postgres database (Neon, Supabase, or local).
 ```
 cd web
 pnpm install
-export DATABASE_URL=postgres://…   SESSION_SECRET=$(openssl rand -hex 32)
+export DATABASE_URL=postgres://…
 pnpm migrate        # creates the tables; safe to re-run
 pnpm build && pnpm start
 ```
 
-On Vercel: import the repo with root directory `web`, set `DATABASE_URL` and `SESSION_SECRET`, and
-run `pnpm migrate` once against the database.
+Environment:
+
+| Variable | Use |
+| --- | --- |
+| `DATABASE_URL` | Postgres. |
+| `RESEND_API_KEY`, `MAIL_FROM` | Sign-in emails via [Resend](https://resend.com). Without a key, links print to the server log. |
+| `APP_HOSTS` | Comma-separated hosts allowed in emailed links, first one is the default. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Web push. Make a pair with `npx web-push generate-vapid-keys`. |
+
+On Vercel: import the repo with root directory `web`, set the variables, and run `pnpm migrate` once.
 
 ## Read the scale from a laptop
 

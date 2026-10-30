@@ -8,3 +8,9 @@ captures/
 # ESPHome build output
 esphome/.esphome/
 esphome/secrets.yaml
+
+# autoharness plugin runtime state (skills under .claude/skills stay tracked)
+.claude/autoharness/
+**/.claude/.claude/
+esphome/.claude/
+.claude/skills/**/*.lock
