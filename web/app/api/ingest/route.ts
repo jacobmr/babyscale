@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse, after } from "next/server";
 import { notifyNewReading } from "@/lib/push";
 import { sql, getBabyByDeviceToken } from "@/lib/db";
+import { allow, clientIp } from "@/lib/rate";
 
 // A scale bridge posts each reading here, in one of two ways:
 //   1. Bridge (current firmware): {"bridge_id": "D80BCB2B7D1D", "key": "<32 hex>", "grams": 3160,
@@ -12,6 +13,11 @@ import { sql, getBabyByDeviceToken } from "@/lib/db";
 // MERGE_SECONDS of the previous one from the same source replaces it instead of adding a row.
 // Device readings arrive as 'pending': they reach the chart only when someone saves them.
 const MERGE_SECONDS = 120;
+// A real bridge posts once per weighing. Limits are counted after the key or token checks out,
+// so a stranger can't use up a real bridge's allowance.
+const READINGS_PER_HOUR = 60;
+const NEW_BRIDGES_PER_DAY = 5; // per client IP
+const tooMany = () => NextResponse.json({ error: "too many requests, try again later" }, { status: 429 });
 
 type Body = { grams?: unknown; measured_at?: unknown; bridge_id?: unknown; key?: unknown; version?: unknown };
 
@@ -39,11 +45,12 @@ export async function POST(req: Request) {
   const at = readingTime(body);
   const since = new Date(at.getTime() - MERGE_SECONDS * 1000);
 
-  if (body.bridge_id !== undefined) return bridgeReading(body, grams, at, since);
+  if (body.bridge_id !== undefined) return bridgeReading(body, grams, at, since, clientIp(req.headers));
 
   const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
   const baby = token ? await getBabyByDeviceToken(token) : undefined;
   if (!baby) return NextResponse.json({ error: "unknown device token" }, { status: 401 });
+  if (!(await allow(`baby:${baby.id}`, READINGS_PER_HOUR, 60))) return tooMany();
 
   const [merged] = await sql<{ id: string }[]>`
     update entries set grams = ${grams}, measured_at = ${at}
@@ -62,7 +69,7 @@ export async function POST(req: Request) {
   return NextResponse.json({ id: row.id, merged: false }, { status: 201 });
 }
 
-async function bridgeReading(body: Body, grams: number, at: Date, since: Date) {
+async function bridgeReading(body: Body, grams: number, at: Date, since: Date, ip: string) {
   const id = String(body.bridge_id).toUpperCase().replace(/[^0-9A-F]/g, "");
   const key = String(body.key ?? "");
   if (id.length !== 12 || !/^[0-9a-f]{32}$/i.test(key))
@@ -71,12 +78,15 @@ async function bridgeReading(body: Body, grams: number, at: Date, since: Date) {
 
   // Trust on first use: the first key a bridge sends is its key from then on.
   const hash = sha256(key.toLowerCase());
+  const [known] = await sql`select 1 from bridges where id = ${id}`;
+  if (!known && !(await allow(`new-bridge:${ip}`, NEW_BRIDGES_PER_DAY, 24 * 60))) return tooMany();
   const [bridge] = await sql<{ key_hash: string }[]>`
     insert into bridges (id, key_hash) values (${id}, ${hash})
     on conflict (id) do update set id = excluded.id
     returning key_hash`;
   if (!timingSafeEqual(Buffer.from(bridge.key_hash), Buffer.from(hash)))
     return NextResponse.json({ error: "wrong key for this bridge" }, { status: 401 });
+  if (!(await allow(`bridge:${id}`, READINGS_PER_HOUR, 60))) return tooMany();
   await sql`
     update bridges set last_seen_at = now(), last_grams = ${grams}, fw_version = coalesce(${version}, fw_version)
     where id = ${id}`;

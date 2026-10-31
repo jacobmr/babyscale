@@ -1,16 +1,16 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import { CreateBabyForm } from "@/components/Forms";
+import { ClaimBridgeForm, CreateBabyForm, DeleteForm } from "@/components/Forms";
 import Inbox from "@/components/Inbox";
 import LocalTime from "@/components/LocalTime";
 import PushButton from "@/components/PushButton";
 import { requireUser } from "@/lib/auth";
 import {
-  listArchivedForUser, listCandidates, listClaimableBridges, listInbox, listMyBabies, listMyBridges, type Bridge,
+  listArchivedForUser, listCandidates, listInbox, listMyBabies, listMyBridges, type Bridge,
 } from "@/lib/db";
 import { formatWeight } from "@/lib/units";
 import {
-  assignReading, claimBridge, createBaby, discardReading, releaseBridge, restoreReading, signOut,
+  assignReading, claimBridge, createBaby, deleteAccount, discardReading, releaseBridge, restoreReading, signOut,
 } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +18,9 @@ export const metadata: Metadata = { title: "Your babies · Baby weight", robots:
 
 export default async function HomePage() {
   const user = await requireUser("/home");
-  const [babies, inbox, candidates, bridges, claimable, archived] = await Promise.all([
+  const [babies, inbox, candidates, bridges, archived] = await Promise.all([
     listMyBabies(user.id), listInbox(user.id), listCandidates(user.id),
-    listMyBridges(user.id), listClaimableBridges(user.id), listArchivedForUser(user.id),
+    listMyBridges(user.id), listArchivedForUser(user.id),
   ]);
   const units = babies[0]?.units ?? "lb";
   const bridgeLine = (b: Bridge) => (
@@ -68,21 +68,16 @@ export default async function HomePage() {
             ))}
           </ul>
         )}
-        {claimable.map((b) => (
-          <div key={b.id} className="row-between">
-            <span>{bridgeLine(b)}</span>
-            <form action={claimBridge.bind(null, b.id)}>
-              <button>This is my bridge</button>
-            </form>
-          </div>
-        ))}
         {process.env.VAPID_PUBLIC_KEY && (bridges.length > 0 || inbox.length > 0) && (
           <PushButton publicKey={process.env.VAPID_PUBLIC_KEY} />
         )}
-        {bridges.length === 0 && claimable.length === 0 && (
-          <p className="muted small">
-            To set up a bridge: weigh something, then reload this page and tap &ldquo;This is my bridge&rdquo;.
-          </p>
+        {bridges.length === 0 ? (
+          <ClaimBridgeForm action={claimBridge} units={units} />
+        ) : (
+          <details>
+            <summary className="small">Add another bridge</summary>
+            <ClaimBridgeForm action={claimBridge} units={units} />
+          </details>
         )}
       </section>
 
@@ -112,6 +107,17 @@ export default async function HomePage() {
       <form action={signOut} className="muted small">
         Signed in as {user.email}. <button className="link">Sign out</button>
       </form>
+
+      <details className="small">
+        <summary className="muted">Delete my account</summary>
+        <DeleteForm
+          action={deleteAccount}
+          name={user.email}
+          what="Delete your account. Babies and pets you share stay with the others. The rest are deleted with all their weights."
+        />
+      </details>
+
+      <p className="muted small"><Link href="/privacy">Privacy</Link></p>
     </>
   );
 }

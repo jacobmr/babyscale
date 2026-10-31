@@ -85,6 +85,38 @@ export function AddEntryForm({ action, units }: { action: Action; units: "lb" | 
   );
 }
 
+// Claim a bridge by typing the weight its scale just showed (proves you're at the scale).
+export function ClaimBridgeForm({ action, units }: { action: Action; units: "lb" | "kg" }) {
+  const [state, run, pending] = useActionState(action, undefined);
+  const [unit, setUnit] = useState(units);
+  return (
+    <form action={run} className="stack">
+      <p className="muted small">
+        Weigh something on the scale, then type the weight it shows. That links its bridge to you.
+      </p>
+      <div className="row">
+        {unit === "kg" ? (
+          <label>kg<input name="kg" type="number" step="0.001" min="0" required inputMode="decimal" /></label>
+        ) : (
+          <>
+            <label>lb<input name="lb" type="number" step="any" min="0" required inputMode="decimal" /></label>
+            <label>oz<input name="oz" type="number" step="0.1" min="0" max="15.9" inputMode="decimal" /></label>
+          </>
+        )}
+        <label>
+          Units
+          <select name="unit" value={unit} onChange={(e) => setUnit(e.target.value as "lb" | "kg")}>
+            <option value="lb">lb + oz</option>
+            <option value="kg">kg</option>
+          </select>
+        </label>
+      </div>
+      <button disabled={pending}>{pending ? "Checking…" : "Add my bridge"}</button>
+      <Status state={state} />
+    </form>
+  );
+}
+
 export function CopyField({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -111,12 +143,12 @@ export function ImportForm({ action }: { action: Action }) {
   );
 }
 
-export function DeleteForm({ action, name }: { action: Action; name: string }) {
+export function DeleteForm({ action, name, what }: { action: Action; name: string; what?: string }) {
   const [state, run, pending] = useActionState(action, undefined);
   return (
     <form action={run} className="stack">
       <label>
-        Delete {name} and all weights. Type <strong>{name}</strong> to confirm.
+        {what ?? `Delete ${name} and all weights.`} Type <strong>{name}</strong> to confirm.
         <input name="confirm" autoComplete="off" required />
       </label>
       <button className="danger-button" disabled={pending}>Delete permanently</button>

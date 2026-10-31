@@ -12,6 +12,14 @@ a growth chart you can share with family.
 > **Status:** working end to end: scale → bridge (Bluetooth) → web app (HTTPS) → phone notification.
 > The bridge updates its own firmware over the air. Tested with one scale and one bridge.
 
+No server? You don't need one. The published firmware sends readings to the hosted app at https://www.babyscale.org, which
+is free to use: flash the bridge, sign in with your email, and add your bridge. To run your own copy
+instead, see "Run your own copy" below.
+
+Don't want to flash anything? We'll mail you a bridge that's ready to go for $15, shipped in the US. Use the
+"Request a bridge" button at https://www.babyscale.org. Then plug it in, put it on your Wi-Fi, sign in, and
+claim it by typing the weight the scale shows.
+
 Not affiliated with Greater Goods. A hobby project, not a medical device.
 
 ## What you need
@@ -19,7 +27,7 @@ Not affiliated with Greater Goods. A hobby project, not a medical device.
 | Part | Notes |
 | --- | --- |
 | Greater Goods Smart Baby Scale, model 0220 (Bluetooth name `BS1711-B`) | Other Lifesense/Transtek "A6" scales may work; untested. |
-| [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit?srsltid=AYCX9vL8IYqvV6n4b0KzDs7S295zRD6oEMR9iYZkYQlE-6ntetOdClfd) (ESP32-C6) | About $8. Its RGB LED shows status. Other ESP32 boards with BLE should work if you change the `esp32:` and LED blocks. |
+| [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) (ESP32-C6) | About $8. Its RGB LED shows status. Other ESP32 boards with BLE should work if you change the `esp32:` and LED blocks. |
 | USB-C cable and a 5 V USB phone charger | Powers the bridge. Data-capable cable for the first flash. |
 | A 2.4 GHz Wi-Fi network | The ESP32 can't use 5 GHz. |
 
@@ -54,8 +62,9 @@ Flashing over Wi-Fi during development: copy `secrets.example.yaml` to `secrets.
    setup hotspot disappears.
 4. Weigh something over 4 lb. The bridge finds the scale on its own (it adopts the first `BS1711-B`
    it hears) and sends the reading as soon as the scale holds it.
-5. In the web app, open **Your babies**: the bridge shows up under "Scale bridge". Tap
-   **This is my bridge**. The reading you just made is waiting in the inbox.
+5. In the web app, open **Your babies**. Under "Scale bridge", type the weight the scale just showed
+   and tap **Add my bridge**. Only someone at the scale knows that number, so nobody else can take
+   your bridge. The reading you just made is waiting in the inbox.
 
 The LED: **blue** while connected to the scale, a **green** flash when a reading is saved, a **red**
 flash if the upload failed.

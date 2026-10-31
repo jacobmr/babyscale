@@ -102,3 +102,12 @@ create table if not exists push_subscriptions (
   auth       text not null,
   created_at timestamptz not null default now()
 );
+
+-- Rate limits: one row per counted event, keyed like "signin-ip:1.2.3.4" or "bridge:D80BCB2B7D1D".
+-- lib/rate.ts writes it and deletes rows older than 2 days as it goes.
+create table if not exists rate_events (
+  key text not null,
+  at  timestamptz not null default now()
+);
+create index if not exists rate_events_key on rate_events (key, at);
+create index if not exists rate_events_at on rate_events (at);

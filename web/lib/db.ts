@@ -111,17 +111,6 @@ export async function listMyBridges(userId: string): Promise<Bridge[]> {
 }
 
 // Bridges heard from in the last 15 minutes that this person hasn't claimed.
-export async function listClaimableBridges(userId: string): Promise<Bridge[]> {
-  return sql<Bridge[]>`
-    select id, fw_version, last_seen_at, last_grams from bridges
-    where last_seen_at > now() - interval '15 minutes'
-      and id not in (select bridge_id from bridge_users where user_id = ${userId})
-    order by last_seen_at desc`;
-}
-
-
-
-
 export async function listMyBabies(userId: string): Promise<{ id: string; name: string; role: string; last_grams: number | null; units: "lb" | "kg" }[]> {
   return sql`
     select b.id, b.name, m.role, b.units,

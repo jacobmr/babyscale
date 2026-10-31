@@ -2,7 +2,9 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { sql, canSeeEntry } from "@/lib/db";
+import { allow, clientIp } from "@/lib/rate";
 import {
   appOrigin, endSession, memberRole, randomId, requireMember, requireUser, sha256, startSession, userForEmail,
 } from "@/lib/auth";
@@ -21,9 +23,11 @@ const safeNext = (next: string) => (/^\/[A-Za-z0-9/_-]*$/.test(next) ? next : "/
 export async function requestLink(_: FormState, f: FormData): Promise<FormState> {
   const email = str(f, "email").toLowerCase();
   if (!EMAIL.test(email) || email.length > 200) return { error: "Enter your email address." };
-  const [{ n }] = await sql<{ n: number }[]>`
-    select count(*)::int n from login_tokens where email = ${email} and created_at > now() - interval '10 minutes'`;
-  if (n >= 3) return { error: "Too many links requested. Use the latest email, or try again in 10 minutes." };
+  if (!(await allow(`signin-email:${email}`, 3, 15))) return { error: "Too many links requested. Use the latest email, or try again in 15 minutes." };
+  // Resend's free plan sends 100 a day: one address can't ask for links for everyone.
+  if (!(await allow(`signin-ip:${clientIp(await headers())}`, 20, 60))) {
+    return { error: "Too many sign-in links from here. Try again in an hour." };
+  }
 
   const token = randomId(32);
   await sql`
@@ -151,6 +155,37 @@ export async function deleteBaby(babyId: string, _: FormState, f: FormData): Pro
   redirect("/home");
 }
 
+// Shared babies pass to the earliest other member; the rest go with all their weights.
+export async function deleteAccount(_: FormState, f: FormData): Promise<FormState> {
+  const user = await requireUser();
+  if (str(f, "confirm").toLowerCase() !== user.email) return { error: `Type ${user.email} to confirm.` };
+  await sql.begin(async (tx) => {
+    const owned = await tx<{ baby_id: string; heir: string | null }[]>`
+      select m.baby_id, (
+        select o.user_id from baby_members o where o.baby_id = m.baby_id and o.user_id <> m.user_id
+        order by o.created_at limit 1) as heir
+      from baby_members m where m.user_id = ${user.id} and m.role = 'owner'`;
+    for (const b of owned) {
+      if (b.heir) await tx`update baby_members set role = 'owner' where baby_id = ${b.baby_id} and user_id = ${b.heir}`;
+      else await tx`delete from babies where id = ${b.baby_id}`;
+    }
+    // Unassigned readings from bridges nobody else has claimed.
+    await tx`
+      delete from entries where baby_id is null and bridge_id in (
+        select bridge_id from bridge_users where user_id = ${user.id}
+        except select bridge_id from bridge_users where user_id <> ${user.id})`;
+    // Bridges only this person claimed go too (readings on babies that survive keep their weights).
+    await tx`
+      delete from bridges where id in (
+        select bridge_id from bridge_users where user_id = ${user.id}
+        except select bridge_id from bridge_users where user_id <> ${user.id})`;
+    await tx`delete from login_tokens where email = ${user.email}`;
+    await tx`delete from users where id = ${user.id}`; // sessions, memberships, bridges, push: on delete cascade
+  });
+  await endSession();
+  redirect("/");
+}
+
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 // "Oct 26 2026 10:40:00 AM -04:00" (Greater Goods export), or anything Date understands (ISO).
@@ -252,14 +287,37 @@ export async function restoreReading(entryId: string) {
   await setReadingStatus(entryId, "archived", "pending");
 }
 
-export async function claimBridge(bridgeId: string) {
+// Claim a bridge by typing the weight its scale just showed. Only someone at the scale knows it,
+// so a stranger can't pick your bridge. Exactly one bridge must match, within 10 minutes.
+const CLAIM_MINUTES = 10;
+const CLAIM_TOLERANCE_G = 15; // about 0.5 oz: people round to the nearest ounce
+const CLAIM_TRIES = 5; // per person per hour
+
+export async function claimBridge(_: FormState, f: FormData): Promise<FormState> {
   const user = await requireUser();
-  // Only a bridge heard from recently: the person claiming it is next to it, weighing something.
+  const grams = f.get("unit") === "kg"
+    ? Math.round(Number(str(f, "kg")) * 1000)
+    : Math.round((Number(str(f, "lb") || 0) + Number(str(f, "oz") || 0) / 16) * GRAMS_PER_LB);
+  if (!Number.isFinite(grams) || grams <= 0 || grams >= 50000) return { error: "Enter the weight the scale showed." };
+
+  if (!(await allow(`claim:${user.id}`, CLAIM_TRIES, 60))) {
+    return { error: "Too many tries. Wait an hour, then weigh something and try again." };
+  }
+
+  const matches = await sql<{ bridge_id: string }[]>`
+    select distinct bridge_id from entries
+    where bridge_id is not null
+      and measured_at > now() - make_interval(mins => ${CLAIM_MINUTES})
+      and abs(grams - ${grams}) <= ${CLAIM_TOLERANCE_G}`;
+  if (matches.length === 0) {
+    return { error: `No scale reported that weight in the last ${CLAIM_MINUTES} minutes. Weigh something and try again.` };
+  }
+  if (matches.length > 1) return { error: "More than one scale matches. Weigh something else and try again." };
   await sql`
-    insert into bridge_users (bridge_id, user_id)
-    select id, ${user.id} from bridges where id = ${bridgeId} and last_seen_at > now() - interval '15 minutes'
+    insert into bridge_users (bridge_id, user_id) values (${matches[0].bridge_id}, ${user.id})
     on conflict do nothing`;
   revalidatePath("/home");
+  return { ok: "Bridge added. Its readings now show up here." };
 }
 
 export async function releaseBridge(bridgeId: string) {
